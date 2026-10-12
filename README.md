@@ -170,9 +170,5 @@ node scripts/auth-test.js         # auth flow (stub)
 
 ---
 
-## 8. Submission steps (from the assessment brief)
 
-- Fork the assessment repo and name it `Binaire-FreznelAI-Assessment`.
-- Upload/push the completed project to GitHub under the name **`Binaire_Freznel_Assessment`**.
-- Email subject: **`Javascript Developer - System Tasks UI Assessment – [Your Full Name]`**.
 
