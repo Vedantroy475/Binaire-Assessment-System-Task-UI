@@ -1,4 +1,5 @@
 import type { AuthService } from "../auth/AuthService";
+import { AuthError } from "../auth/AuthError";
 import type { AuthUser } from "../types";
 import { SessionStore } from "../offline/SessionStore";
 import { SignUpScreen } from "../components/Auth/SignUpScreen";
@@ -34,13 +35,23 @@ export class AuthPage {
     this.screenComp = new SignUpScreen(
       screen,
       auth,
-      async (email, password, name) => {
-        const user = await auth.signUp(email, password, name || email.split("@")[0]);
-        if (user) {
+      async (email, password, name, mode) => {
+        try {
+          // Route by mode: the toggle switches between registering a new
+          // account (signUp) and signing into an existing one (signIn).
+          const user =
+            mode === "signin"
+              ? await auth.signIn(email, password)
+              : await auth.signUp(email, password, name || email.split("@")[0]);
           session.set(user);
           this.onAuthed(user);
-        } else {
-          this.screenComp.setError("Sign up failed. Please try again.");
+        } catch (err) {
+          // Present a specific, user-friendly message for known failures.
+          const message =
+            err instanceof AuthError
+              ? err.message
+              : "Something went wrong. Please try again.";
+          this.screenComp.setError(message);
         }
       },
     );

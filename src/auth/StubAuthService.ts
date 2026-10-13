@@ -1,4 +1,5 @@
 import type { AuthService } from "./AuthService";
+import { AuthError } from "./AuthError";
 import type { AuthUser } from "../types";
 
 /**
@@ -11,8 +12,10 @@ import type { AuthUser } from "../types";
 export class StubAuthService implements AuthService {
   private user: AuthUser | null = null;
 
-  async signIn(email: string, password: string): Promise<AuthUser | null> {
-    if (!email || !password) return null;
+  async signIn(email: string, password: string): Promise<AuthUser> {
+    if (!email || !password) {
+      throw new AuthError("INVALID_INPUT", "Email and password are required.");
+    }
     this.user = {
       uid: "stub-uid",
       email,
@@ -25,8 +28,10 @@ export class StubAuthService implements AuthService {
     email: string,
     password: string,
     displayName: string,
-  ): Promise<AuthUser | null> {
-    if (!email || !password) return null;
+  ): Promise<AuthUser> {
+    if (!email || !password) {
+      throw new AuthError("INVALID_INPUT", "Email and password are required.");
+    }
     this.user = {
       uid: "stub-uid",
       email,
