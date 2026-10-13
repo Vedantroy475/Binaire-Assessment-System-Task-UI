@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { loadConfig } from "./auth/AuthConfig";
 import { StubAuthService } from "./auth/StubAuthService";
+import { FirebaseAuthService } from "./auth/FirebaseAuthService";
 import type { AuthService } from "./auth/AuthService";
 import { SessionStore } from "./offline/SessionStore";
 import { SystemInfoService } from "./api/SystemInfoService";
@@ -23,6 +24,22 @@ declare const blessed: any;
  */
 async function main(): Promise<void> {
   const config = loadConfig();
+
+  // Guard: real Firebase auth was requested (AUTH_STUB=false) but no API key is
+  // configured. Exit gracefully with a clear error instead of silently falling
+  // back to the demo stub or crashing later on the first sign-in attempt.
+  if (
+    !config.authStub &&
+    (!config.firebase.apiKey || config.firebase.apiKey.trim() === "")
+  ) {
+    // eslint-disable-next-line no-console
+    console.error(
+      "AUTH_STUB=false but FIREBASE_API_KEY is not set.\n" +
+        "Copy .env.example to .env and add your Firebase web API key, or set " +
+        "AUTH_STUB=true to run in demo mode.",
+    );
+    process.exit(1);
+  }
 
   // Enter the alternate screen buffer for a clean, full-screen TUI.
   process.stdout.write("\x1b[?1049h\x1b[2J\x1b[H");
@@ -94,16 +111,15 @@ async function main(): Promise<void> {
 }
 
 /**
- * Factory for the real Firebase auth service.
- * Implemented later once Firebase credentials are provided; for now it throws
- * a clear message so the developer knows to set AUTH_STUB=true or add the impl.
+ * Factory for the real Firebase auth service (Identity Platform REST API).
+ * The FirebaseAuthService constructor validates the API key and throws a
+ * friendly AuthError if it is missing; main() has already guarded the
+ * AUTH_STUB=false + missing-key case before this runs.
  */
 async function createFirebaseAuth(_config: ReturnType<typeof loadConfig>): Promise<AuthService> {
-  // TODO: return new FirebaseAuthService(config.firebase);
-  throw new Error(
-    "Firebase auth requested (AUTH_STUB=false) but FirebaseAuthService is not implemented yet. " +
-      "Set AUTH_STUB=true to run in demo mode, or implement src/auth/FirebaseAuthService.ts.",
-  );
+  // The config.firebase object carries all Firebase web config fields; only
+  // apiKey is required by the REST implementation.
+  return new FirebaseAuthService({ apiKey: _config.firebase.apiKey });
 }
 
 function shutdown(screen: any): void {

@@ -12,12 +12,22 @@ export class SignUpScreen {
   private status: any;
   private inputs: any = {};
   private mode: "signup" | "signin" = "signup";
-  private onSubmit: (email: string, password: string, name: string) => void;
+  private onSubmit: (
+    email: string,
+    password: string,
+    name: string,
+    mode: "signup" | "signin",
+  ) => void;
 
   constructor(
     private screen: any,
     private readonly auth: AuthService,
-    onSubmit: (email: string, password: string, name: string) => void,
+    onSubmit: (
+      email: string,
+      password: string,
+      name: string,
+      mode: "signup" | "signin",
+    ) => void,
   ) {
     this.onSubmit = onSubmit;
 
@@ -149,7 +159,7 @@ export class SignUpScreen {
     }
     this.status.setContent(" {yellow-fg}Working…{/yellow-fg}");
     this.screen.render();
-    this.onSubmit(email, password, name);
+    this.onSubmit(email, password, name, this.mode);
   }
 
   setError(message: string): void {
