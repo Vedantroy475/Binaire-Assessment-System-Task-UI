@@ -2,18 +2,14 @@ import type { AuthService } from "../auth/AuthService";
 import { AuthError } from "../auth/AuthError";
 import type { AuthUser } from "../types";
 import { SessionStore } from "../offline/SessionStore";
-import { SignUpScreen } from "../components/Auth/SignUpScreen";
+import { AuthFlow } from "../components/Auth/AuthFlow";
+import { StubAuthService } from "../auth/StubAuthService";
 
 declare const blessed: any;
 
-/**
- * AuthPage — the authentication gate shown before the dashboard.
- * Renders the sign-up screen (which also toggles to sign-in) and coordinates
- * credential submission with the AuthService. On success it invokes onAuthed.
- */
 export class AuthPage {
   private title: any;
-  private screenComp: SignUpScreen;
+  private screenComp: AuthFlow;
 
   constructor(
     private screen: any,
@@ -21,24 +17,29 @@ export class AuthPage {
     private readonly session: SessionStore,
     private readonly onAuthed: (user: AuthUser) => void,
   ) {
+    const isStub = auth instanceof StubAuthService;
+    const modeBadge = isStub
+      ? "{yellow-fg}[DEMO STUB MODE - Firebase Disabled]{/yellow-fg}"
+      : "{green-fg}[FIREBASE ACTIVE]{/green-fg}";
+
     this.title = blessed.box({
       parent: screen,
-      top: 2,
+      top: 1,
       left: "center",
       width: "shrink",
-      height: 3,
+      height: 4,
       tags: true,
       content:
-        "{bold}{cyan-fg}Binaire Freznel Assessment{/cyan-fg}{/bold}\n{gray-fg}System Tasks & Sensor Viewer{/gray-fg}",
+        `{bold}{cyan-fg}Binaire Freznel Assessment{/cyan-fg}{/bold}\n` +
+        `{gray-fg}System Tasks & Sensor Viewer{/gray-fg}\n` +
+        `${modeBadge}`,
     });
 
-    this.screenComp = new SignUpScreen(
+    this.screenComp = new AuthFlow(
       screen,
       auth,
       async (email, password, name, mode) => {
         try {
-          // Route by mode: the toggle switches between registering a new
-          // account (signUp) and signing into an existing one (signIn).
           const user =
             mode === "signin"
               ? await auth.signIn(email, password)
@@ -46,7 +47,6 @@ export class AuthPage {
           session.set(user);
           this.onAuthed(user);
         } catch (err) {
-          // Present a specific, user-friendly message for known failures.
           const message =
             err instanceof AuthError
               ? err.message
@@ -59,7 +59,6 @@ export class AuthPage {
     this.screen.render();
   }
 
-  /** Tear down the auth UI when transitioning to the dashboard. */
   destroy(): void {
     this.screen.remove(this.title);
     this.title.destroy?.();

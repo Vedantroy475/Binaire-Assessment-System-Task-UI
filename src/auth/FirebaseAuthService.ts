@@ -2,20 +2,6 @@ import type { AuthService } from "./AuthService";
 import { AuthError } from "./AuthError";
 import type { AuthUser } from "../types";
 
-/**
- * FirebaseAuthService — Firebase Authentication (Email/Password) implemented
- * against the Identity Platform REST API using Node's built-in `fetch`.
- *
- * Security notes:
- *  - Only the public web API key is used; it is a project identifier, not a
- *    secret. It must never be confused with a privileged service-account key.
- *  - The Firebase Admin SDK / service-account private keys are intentionally
- *    NOT used: this is a distributed CLI with no trusted backend.
- *  - Passwords and tokens (idToken / refreshToken) are never logged or stored.
- *  - The REST response may contain idToken/refreshToken; those fields are read
- *    into a local variable only to build the user, then discarded. No token is
- *    persisted to disk or kept in memory beyond the session's AuthUser.
- */
 interface FirebaseConfig {
   apiKey: string;
 }
@@ -66,12 +52,6 @@ export class FirebaseAuthService implements AuthService {
     this.user = null;
   }
 
-  /**
-   * POST to an Identity Toolkit endpoint and return the parsed JSON body.
-   * All failures (network or Firebase error responses) are converted to a
-   * user-friendly AuthError. Neither the URL (which contains the API key) nor
-   * the request/response bodies (which contain tokens) are ever logged.
-   */
   private async post(
     endpoint: string,
     payload: Record<string, unknown>,
@@ -88,16 +68,12 @@ export class FirebaseAuthService implements AuthService {
         body: JSON.stringify(payload),
       });
     } catch {
-      // Network failure / DNS / offline. The URL is intentionally omitted from
-      // the message because it contains the API key.
       throw new AuthError(
         "NETWORK_ERROR",
         "Could not reach Firebase. Check your internet connection and try again.",
       );
     }
 
-    // Parse the JSON body once. It may contain idToken/refreshToken, so it is
-    // only ever inspected for the error code and the user identifiers.
     let body: any = null;
     try {
       body = await res.json();
@@ -112,14 +88,17 @@ export class FirebaseAuthService implements AuthService {
     return body as Record<string, unknown>;
   }
 
-  /** Map an Identity Platform error response to a friendly AuthError. */
   private mapFirebaseError(body: any): AuthError {
     const raw: string =
       body && body.error && typeof body.error.message === "string"
         ? body.error.message
         : "";
 
-    switch (raw) {
+    // Firebase frequently returns error strings like "WEAK_PASSWORD : ..."
+    // Extract the primary code prefix before matching:
+    const code = raw.split(":")[0].trim();
+
+    switch (code) {
       case "EMAIL_EXISTS":
         return new AuthError(
           "EMAIL_EXISTS",
@@ -139,12 +118,22 @@ export class FirebaseAuthService implements AuthService {
       case "WEAK_PASSWORD":
         return new AuthError(
           "WEAK_PASSWORD",
-          "Password is too weak. Please choose a stronger password.",
+          "Password is too weak. Must be at least 6 characters.",
         );
       case "INVALID_EMAIL":
         return new AuthError(
           "INVALID_EMAIL",
           "That email address doesn't look valid. Please check and try again.",
+        );
+      case "OPERATION_NOT_ALLOWED":
+        return new AuthError(
+          "OPERATION_NOT_ALLOWED",
+          "Email/Password provider is not enabled in your Firebase Console.",
+        );
+      case "API_KEY_INVALID":
+        return new AuthError(
+          "API_KEY_INVALID",
+          "Invalid Firebase API Key. Please verify your FIREBASE_API_KEY in .env.",
         );
       case "USER_DISABLED":
         return new AuthError(
@@ -159,12 +148,11 @@ export class FirebaseAuthService implements AuthService {
       default:
         return new AuthError(
           "UNKNOWN",
-          "Authentication failed. Please try again.",
+          raw ? `Firebase: ${raw}` : "Authentication failed. Please try again.",
         );
     }
   }
 
-  /** Build an AuthUser from a successful Identity Platform response. */
   private toUser(
     body: Record<string, unknown>,
     fallbackName?: string,
