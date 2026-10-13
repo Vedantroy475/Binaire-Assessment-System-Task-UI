@@ -12,11 +12,6 @@ import { useSystemStats } from "../hooks/useSystemStats";
 
 declare const blessed: any;
 
-/**
- * DashboardPage — the main live monitor screen.
- * Owns the layout, wires keyboard navigation/interactivity, and pushes filtered
- * snapshots into every panel on each refresh.
- */
 export class DashboardPage {
   private layout: AppLayout;
   private searchBox: SearchBox;
@@ -25,6 +20,7 @@ export class DashboardPage {
   private keys = new KeyboardManager();
   private lastBundle: StatsBundle | null = null;
   private user: AuthUser | null;
+  private activeModal: any | null = null;
 
   constructor(
     private screen: any,
@@ -42,15 +38,12 @@ export class DashboardPage {
     this.sortMenu = new SortMenu(screen, sort);
     this.filterMenu = new FilterMenu(screen, filter);
 
-    // Re-render whenever a modal menu closes (it may change the data view).
     this.patchMenuRefresh();
-
     this.bindKeys();
     this.layout.proc.focus();
     this.renderFooter();
   }
 
-  /** Make SearchBox/SortMenu/FilterMenu trigger a redraw on close. */
   private patchMenuRefresh(): void {
     for (const menu of [this.searchBox, this.sortMenu, this.filterMenu]) {
       const originalClose = menu.close.bind(menu);
@@ -64,7 +57,12 @@ export class DashboardPage {
   // --- Keyboard wiring -------------------------------------------------------
 
   private anyMenuOpen(): boolean {
-    return this.searchBox.isActive() || this.sortMenu.isActive() || this.filterMenu.isActive();
+    return (
+      this.activeModal !== null ||
+      this.searchBox.isActive() ||
+      this.sortMenu.isActive() ||
+      this.filterMenu.isActive()
+    );
   }
 
   private bindKeys(): void {
@@ -96,10 +94,16 @@ export class DashboardPage {
     this.keys.on("t", () => this.confirmTerminate());
     this.keys.on("S", () => this.layout.proc.focus());
 
-    this.screen.on("keypress", (ch: string, key: { name?: string; full?: string; ctrl?: boolean; shift?: boolean }) => {
-      if (this.anyMenuOpen()) return;
-      this.keys.dispatch(ch, key);
-    });
+    this.screen.on(
+      "keypress",
+      (
+        ch: string,
+        key: { name?: string; full?: string; ctrl?: boolean; shift?: boolean },
+      ) => {
+        if (this.anyMenuOpen()) return;
+        this.keys.dispatch(ch, key);
+      },
+    );
   }
 
   private quit(): void {
@@ -109,13 +113,12 @@ export class DashboardPage {
     } catch {
       /* ignore */
     }
-    process.stdout.write("\x1b[?1049l"); // leave alternate screen
+    process.stdout.write("\x1b[?1049l");
     process.exit(0);
   }
 
   // --- Data / rendering ------------------------------------------------------
 
-  /** Push a fresh stats bundle into the UI. */
   onStats(bundle: StatsBundle): void {
     this.lastBundle = bundle;
     this.redraw();
@@ -130,12 +133,12 @@ export class DashboardPage {
   private renderFooter(): void {
     const selected = this.layout.proc.selectedProcess();
     const counter = selected ? ` ${selected.pid} ` : " 0 ";
-    const base = " select ↑↓  info:enter  terminate:t  search:/  sort:s  filter:f  quit:q";
+    const base =
+      " select ↑↓  info:enter/i  terminate:t  search:/  sort:s  filter:f  quit:q";
     const left = this.user ? ` ${this.user.email} ▸${base}` : base;
     this.layout.renderFooter(left, counter);
   }
 
-  /** Force a redraw after a menu changes the data view. */
   refreshFromMenu(): void {
     this.redraw();
     this.renderFooter();
@@ -148,6 +151,7 @@ export class DashboardPage {
   // --- Actions ---------------------------------------------------------------
 
   private showInfo(): void {
+    if (this.activeModal) return;
     const proc = this.layout.proc.selectedProcess();
     if (!proc) return;
     const raw = proc.raw();
@@ -157,46 +161,60 @@ export class DashboardPage {
       `{bold}Command:{/bold} ${raw.command || raw.name}`,
       `{bold}User:{/bold} ${raw.user}   {bold}State:{/bold} ${raw.state}`,
       `{bold}CPU:{/bold} ${raw.cpu.toFixed(1)}%   {bold}Mem:{/bold} ${raw.memBytes} B`,
+      "",
+      "{gray-fg}[ Esc / q / Enter / Backspace to close ]{/gray-fg}",
     ];
-    this.modal(" info ", 64, lines.length + 2, lines);
+    this.modal(" Process Info ", 64, lines.length + 2, lines);
   }
 
   private confirmTerminate(): void {
+    if (this.activeModal) return;
     const proc = this.layout.proc.selectedProcess();
     if (!proc) return;
+
     const box = blessed.box({
       parent: this.screen,
       label: ` terminate pid ${proc.pid}? `,
       top: "center",
       left: "center",
-      width: 46,
-      height: 7,
+      width: 48,
+      height: 8,
       tags: true,
       border: { type: "line", fg: "red" },
       style: { border: { fg: "red" } },
       keys: true,
     });
+
     blessed.text({
       parent: box,
-      top: 2,
+      top: 1,
       left: 2,
       right: 2,
-      height: 2,
+      height: 3,
       tags: true,
-      content: ` {bold}${proc.name}{/bold} (${proc.pid})\n Kill this process? [y/N]`,
+      content: ` {bold}${proc.name}{/bold} (${proc.pid})\n Kill this process? [y/N]\n {gray-fg}[Esc / n to cancel]{/gray-fg}`,
       style: { fg: "white" },
     });
-    const focusable = blessed.textbox({ parent: box, inputOnFocus: true });
-    focusable.focus();
+
+    this.activeModal = box;
+    box.focus();
+
     box.on("keypress", (ch: string, key: { name?: string }) => {
       if (ch === "y" || ch === "Y") {
         this.terminate(proc.pid);
         this.closeModal(box);
-      } else if (key?.name === "escape" || ch === "n" || key?.name === "enter") {
+      } else if (
+        key?.name === "escape" ||
+        key?.name === "enter" ||
+        ch === "n" ||
+        ch === "N" ||
+        ch === "q"
+      ) {
         this.closeModal(box);
       }
       this.screen.render();
     });
+
     box.setFront();
     this.screen.render();
   }
@@ -211,7 +229,12 @@ export class DashboardPage {
     void this.stats.poll();
   }
 
-  private modal(label: string, width: number, height: number, contentLines: string[]): void {
+  private modal(
+    label: string,
+    width: number,
+    height: number,
+    contentLines: string[],
+  ): void {
     const box = blessed.box({
       parent: this.screen,
       label,
@@ -224,6 +247,7 @@ export class DashboardPage {
       style: { border: { fg: "cyan" } },
       keys: true,
     });
+
     blessed.text({
       parent: box,
       top: 1,
@@ -233,19 +257,29 @@ export class DashboardPage {
       content: contentLines.join("\n"),
       style: { fg: "white" },
     });
-    const focusable = blessed.textbox({ parent: box, inputOnFocus: true });
-    focusable.focus();
+
+    this.activeModal = box;
+    box.focus();
+
     box.on("keypress", (ch: string, key: { name?: string }) => {
-      if (key?.name === "escape" || key?.name === "enter" || ch === "q") {
+      if (
+        key?.name === "escape" ||
+        key?.name === "enter" ||
+        key?.name === "backspace" ||
+        ch === "q" ||
+        ch === "x"
+      ) {
         this.closeModal(box);
       }
       this.screen.render();
     });
+
     box.setFront();
     this.screen.render();
   }
 
   private closeModal(box: any): void {
+    this.activeModal = null;
     this.screen.remove(box);
     box.destroy?.();
     this.layout.proc.focus();
